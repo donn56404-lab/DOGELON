@@ -1,66 +1,55 @@
 #!/usr/bin/env python3
 """
-Standalone Raid-Smash Script (Telethon)
-- Logs in as your Telegram user (creates a session file).
-- Listens to a single group (TG_GROUP_ID) for messages from raid bot(s).
-- If a raid message containing a tweet link is found, clicks the inline "👊" button
-  (or any button whose label contains "👊") and logs the callback feedback.
-- Writes events to a JSON log file (tweet_and_raid_log.json).
-- Prevents double-smashing the same tweet during the same runtime (in-memory).
---
-HOW TO USE:
-1. Install dependencies:
-   pip install telethon
-
-2. Edit the CONFIG section below:
-   - TG_API_ID, TG_API_HASH: from my.telegram.org
-   - SESSION: session filename prefix (e.g., "session")
-   - TG_GROUP_ID: group id where raids appear (integer, negative for supergroups)
-   - RAID_BOT_IDS: list of raid bot numeric IDs
-
-3. Run:
-   python raid_smash.py
-   The first run will prompt you to log in (phone number + confirmation code).
+Raid-Smash Script + Dummy Webhook (Render-compatible)
+------------------------------------------------------
+- Telethon client listens for raid messages.
+- Flask web app runs alongside as a dummy website/webhook endpoint.
+  (Used to keep Render/Railway services alive or respond to external pings.)
 """
 
 import os
 import json
 import re
 import asyncio
+import threading
 from datetime import datetime
 from telethon import TelegramClient, events, functions
+from flask import Flask, jsonify, request
 
 # ===================== CONFIG - EDIT THESE =====================
-TG_API_ID = 27403368                # <- REPLACE with your API ID (integer)
-TG_API_HASH = "7cfc7759b82410f5d90641d6a6fc415f"     # <- REPLACE with your API HASH (string)
-SESSION = "session"               # session file prefix (e.g., "session")
-TG_GROUP_ID = -1002325443922      # <- REPLACE with the group ID you watch (integer)
-RAID_BOT_IDS = [8004181615]       # <- REPLACE with the raid bot's Telegram numeric ID(s)
+TG_API_ID = 27403368
+TG_API_HASH = "7cfc7759b82410f5d90641d6a6fc415f"
+SESSION = "session"
+TG_GROUP_ID = -1002325443922
+RAID_BOT_IDS = [8004181615]
 LOG_FILE = "tweet_and_raid_log.json"
-# ===================== END CONFIG =================================
+PORT = int(os.getenv("PORT", 8080))  # Render sets PORT automatically
+# ===================== END CONFIG ===============================
 
-# Create Telethon client
 client = TelegramClient(SESSION, TG_API_ID, TG_API_HASH)
-
-# In-memory set to avoid double-smash during runtime
 smashed_tweet_ids = set()
 
-# Regex to extract tweet URL and tweet id from message text
 TWEET_RE = re.compile(
     r"(https?://(?:t.co|(?:mobile\.)?twitter\.com|(?:www\.)?twitter\.com|x\.com)/[^\s]+/status(?:es)?/(\d+))",
     re.IGNORECASE
 )
 
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return jsonify({"status": "ok", "message": "Dummy webhook online 🚀"})
+
+@app.route("/listener", methods=["POST", "GET"])
+def listener():
+    data = request.get_json(silent=True) or {}
+    print("📩 Received dummy webhook:", data)
+    return jsonify({"received": True, "data": data, "message": "Listening ✅"})
 
 def now_iso():
     return datetime.utcnow().isoformat() + "Z"
 
-
 def save_json_append(path, entry):
-    """
-    Append an entry (dict) to a JSON array file. Creates file if missing.
-    Falls back to newline-delimited JSON if the file is corrupted.
-    """
     try:
         if not os.path.exists(path):
             with open(path, "w", encoding="utf-8") as f:
@@ -75,18 +64,13 @@ def save_json_append(path, entry):
                 json.dump(arr, f, indent=2)
                 f.truncate()
             except json.JSONDecodeError:
-                # fallback: append newline-delimited JSON
                 f.close()
                 with open(path, "a", encoding="utf-8") as fa:
                     fa.write(json.dumps(entry) + "\n")
     except Exception as e:
         print(f"⚠️ Failed to save log entry: {e}")
 
-
 def extract_tweet(text):
-    """
-    Return (tweet_url, tweet_id) if found in text, else (None, None).
-    """
     if not text:
         return None, None
     m = TWEET_RE.search(text)
@@ -94,12 +78,7 @@ def extract_tweet(text):
         return m.group(1), m.group(2)
     return None, None
 
-
 async def click_inline_button(client_obj, message, match_texts=("👊",)):
-    """
-    Find an inline button whose label contains any of match_texts (case-insensitive),
-    trigger the button callback, and return a result dict with feedback.
-    """
     buttons = getattr(message, "buttons", None) or getattr(message, "reply_markup", None)
     if not buttons:
         return {"clicked": False, "reason": "no_buttons"}
@@ -122,29 +101,21 @@ async def click_inline_button(client_obj, message, match_texts=("👊",)):
                     return {"clicked": False, "button_text": lbl, "error": repr(e)}
     return {"clicked": False, "reason": "no_matching_label"}
 
-
 @client.on(events.NewMessage(chats=[TG_GROUP_ID], incoming=True))
 async def raid_handler(event):
-    """
-    Listen for new messages in the configured group. If the message sender is in RAID_BOT_IDS
-    and the message contains a tweet URL, click the '👊' button if present, log feedback,
-    and avoid double-smashing the same tweet ID during runtime.
-    """
     try:
         msg = event.message
-        # get sender (bot) id
         sender = await event.get_sender()
         sender_id = getattr(sender, "id", None)
         if not sender_id or sender_id not in RAID_BOT_IDS:
-            return  # ignore messages not from the configured raid bot(s)
+            return
 
         text = (msg.text or "") + " " + " ".join(att.url for att in getattr(msg, "media", []) or [])
         tweet_url, tweet_id = extract_tweet(msg.text or "")
         if not tweet_id:
-            # Some bots may include the tweet link in entities/media or caption; try full message string too
             tweet_url, tweet_id = extract_tweet(str(msg))
         if not tweet_id:
-            return  # no tweet URL found
+            return
 
         if tweet_id in smashed_tweet_ids:
             print(f"⚠️ Already smashed (runtime): {tweet_url}")
@@ -163,26 +134,23 @@ async def raid_handler(event):
             "smash": click_result
         }
         save_json_append(LOG_FILE, entry)
-
-        feedback = click_result.get('callback_result') or click_result.get('error') or click_result.get('reason')
-        print(f"🔘 Raid smashed: {tweet_url}, feedback: {feedback}")
-
+        print(f"🔘 Raid smashed: {tweet_url}")
     except Exception as e:
         print("❌ raid_handler error:", repr(e))
 
-
-async def main():
-    print("🚀 Starting Raid-Smash client...")
+async def telethon_worker():
     await client.start()
     me = await client.get_me()
-    print(f"✅ Logged in as: {getattr(me, 'username', getattr(me, 'first_name', 'Unknown'))}")
-    print(f"Listening for raids in group {TG_GROUP_ID} from bot IDs {RAID_BOT_IDS} ...")
-    # run until disconnected
+    print(f"✅ Logged in as {me.username or me.first_name}")
     await client.run_until_disconnected()
 
+def start_flask():
+    print(f"🌐 Dummy site running on port {PORT}")
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
+    threading.Thread(target=start_flask, daemon=True).start()
     try:
-        asyncio.run(main())
+        asyncio.run(telethon_worker())
     except KeyboardInterrupt:
-        print("\nExiting on user interrupt.")
+        print("\n👋 Exiting cleanly.")
