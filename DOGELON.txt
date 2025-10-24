@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""
+Unified Twitter (X) posting + Telethon raid-smash script (final)
+- 10 posts/day:
+  - 4 ELON timeline posts (texts/elon.txt) with random images
+  - 4 replies to influencers with text + image
+  - 2 healthy crypto updates (CoinMarketCap top-10, 2 random coins each cycle) — text-only
+- Posts shuffled and posted within a 1-hour window per cycle
+- After cycle, sends only the 8 ELON-related links (timeline + replies) to the same Telegram group (your logged-in account)
+- Telethon listens for raid posts and auto-smashes 👊 inline button, logging feedback
+- In-memory duplicate prevention only (no persistence)
+"""
+
+import os
+import json
+import random
+import re
+import asyncio
+import requests
+from datetime import datetime
+import tweepy
+from telethon import TelegramClient, events, functions
+
+# ===================== CONFIG - EDIT THESE =====================
+# Twitter (X) API (OAuth1) - required for media uploads & replies
+API_KEY = "YOUR_API_KEY"
+API_SECRET = "YOUR_API_SECRET"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+ACCESS_SECRET = "YOUR_ACCESS_SECRET"
+
+# CoinMarketCap API (you provided this key earlier)
+CMC_API_KEY = "1486e6cc979e412dabc03c5e72c1c63a"
+
+# Telegram config (Telethon will login as your user - session file created locally)
+TG_API_ID = 123456              # replace with your API ID (integer)
+TG_API_HASH = "your_api_hash"   # replace with your API HASH
+SESSION = "session"             # session filename prefix
+TG_GROUP_ID = -1001234567890    # the group ID (same group you monitor for raids and want links posted)
+RAID_BOT_IDS = [5994885234]     # list of raid bot Telegram IDs to react to
+
+# Files & folders expected
+ELON_TEXTS = "texts/elon.txt"         # one variation per line
+IMAGES_FOLDER = "images"              # images used for timeline posts and replies
+INFLUENCERS_FILE = "influencers.txt"  # influencer handles (without @), one per line
+LOG_FILE = "tweet_and_raid_log.json"  # unified log
+
+# Posting counts (strict)
+NUM_ELON_TIMELINE = 4
+NUM_INFLUENCER_REPLIES = 4
+NUM_HEALTHY = 2
+TOTAL_PER_DAY = NUM_ELON_TIMELINE + NUM_INFLUENCER_REPLIES + NUM_HEALTHY  # 10
+
+POST_WINDOW_SECONDS = 3600  # 1 hour window to post all 10
+MIN_NEXT_HOURS = 23
+MAX_NEXT_HOURS = 27
+
+# Top-10 coin symbols to choose from for healthy posts
+TOP_10_COINS = ["BTC", "ETH", "BNB", "XRP", "ADA", "DOGE", "SOL", "DOT", "LTC", "LINK"]
+
+# ===================== SETUP =====================
+# Tweepy (v1.1 methods for media upload & update_status)
+auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
+api = tweepy.API(auth, wait_on_rate_limit=True)
+
+# Telethon (user session)
+client = TelegramClient(SESSION, TG_API_ID, TG_API_HASH)
+
+# In-memory sets to avoid duplicates during runtime
+replied_tweet_ids = set()
+smashed_tweet_ids = set()
+
+# Tweet URL regex for extraction from Telegram messages
+TWEET_RE = re.compile(
+    r"(https?://(?:t.co|(?:mobile\.)?twitter\.com|(?:www\.)?twitter\.com|x\.com)/[^\s]+/status(?:es)?/(\d+))",
+    re.IGNORECASE
+)
+
+# ===================== HELPERS =====================
+def now_iso():
+    return datetime.utcnow().isoformat() + "Z"
+
+def save_json_append(path, entry):
+    # Append as JSON array; create file if missing.
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([], f)
+    try:
+        with open(path, "r+", encoding="utf-8") as f:
+            arr = json.load(f)
+            arr.append(entry)
+            f.seek(0)
+            json.dump(arr, f, indent=2)
+            f.truncate()
+    except Exception as e:
+        # fallback simple append newline if JSON fails
+        try:
+            with open(path, "a", encoding="utf-8") as fa:
+                fa.write(json.dumps(entry) + "\n")
+        except Exception:
+            print("⚠️ Failed to log entry:", e)
+
+def load_lines(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+def extract_tweet(text):
+    if not text:
+        return None, None
+    m = TWEET_RE.search(text)
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
+
+# Post timeline tweet (with optional image) -> returns (tweet_id_str, url) or (None,None)
+def post_timeline(text, image_path=None):
+    try:
+        if image_path and os.path.exists(image_path):
+            media = api.media_upload(image_path)
+            res = api.update_status(status=text, media_ids=[media.media_id_string])
+        else:
+            res = api.update_status(status=text)
+        tid = getattr(res, "id_str", str(res.id))
+        url = f"https://x.com/{res.user.screen_name}/status/{tid}"
+        return tid, url
+    except Exception as e:
+        print("❌ Error posting timeline:", e)
+        return None, None
+
+# Reply to a tweet with optional image -> returns (tweet_id_str, url) or (None,None)
+def reply_to_tweet_with_image(in_reply_to_status_id, reply_text, image_path=None):
+    try:
+        media_ids = None
+        if image_path and os.path.exists(image_path):
+            media = api.media_upload(image_path)
+            media_ids = [media.media_id_string]
+        res = api.update_status(
+            status=reply_text,
+            in_reply_to_status_id=in_reply_to_status_id,
+            auto_populate_reply_metadata=True,
+            media_ids=media_ids
+        )
+        tid = getattr(res, "id_str", str(res.id))
+        url = f"https://x.com/{res.user.screen_name}/status/{tid}"
+        return tid, url
+    except Exception as e:
+        print("❌ Error replying to tweet:", e)
+        return None, None
+
+# Get latest tweet id + url for a handle (returns (id_str, url) or (None,None))
+def get_latest_tweet_for_handle(handle):
+    try:
+        tweets = api.user_timeline(screen_name=handle, count=1, trim_user=True, exclude_replies=False, include_rts=False)
+        if tweets:
+            t = tweets[0]
+            tid = getattr(t, "id_str", str(t.id))
+            url = f"https://x.com/{handle}/status/{tid}"
+            return tid, url
+    except Exception as e:
+        print(f"❌ Error fetching latest tweet for @{handle}: {e}")
+    return None, None
+
+# CoinMarketCap data fetch for one symbol -> returns dict or None
+def fetch_cmc_quote(symbol):
+    try:
+        url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+        params = {"symbol": symbol, "convert": "USD"}
+        headers = {"Accepts": "application/json", "X-CMC_PRO_API_KEY": CMC_API_KEY}
+        r = requests.get(url, headers=headers, params=params, timeout=15)
+        r.raise_for_status()
+        payload = r.json()
+        data = payload["data"][symbol]["quote"]["USD"]
+        return data
+    except Exception as e:
+        print(f"❌ CMC fetch error for {symbol}: {e}")
+        return None
+
+# Build the healthy crypto update post text for a symbol (text-only)
+def build_crypto_post(symbol):
+    data = fetch_cmc_quote(symbol)
+    if not data:
+        return f"{symbol} update unavailable right now."
+    price = data.get("price", 0.0)
+    percent_change = data.get("percent_change_24h", 0.0)
+    market_cap = data.get("market_cap", 0.0)
+    volume = data.get("volume_24h", 0.0)
+    direction = "📈" if percent_change >= 0 else "📉"
+    time_now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    # Format values
+    price_s = f"${price:,.2f}"
+    pc_s = f"{percent_change:+.2f}%"
+    mc_s = f"${market_cap/1e9:.2f}B" if market_cap >= 1e9 else f"${market_cap/1e6:.2f}M"
+    vol_s = f"${volume/1e9:.2f}B" if volume >= 1e9 else f"${volume/1e6:.2f}M"
+    post_text = (
+        f"💰 {symbol} Update {direction}\n\n"
+        f"Price: {price_s} USD\n"
+        f"24h Change: {pc_s}\n"
+        f"Market Cap: {mc_s}\n"
+        f"Volume (24h): {vol_s}\n"
+        f"Time: {time_now}\n\n"
+        f"#{symbol} #Crypto"
+    )
+    return post_text
+
+# Click inline button for raid smash - returns dict with feedback
+async def click_inline_button(client_obj, message, match_texts=("👊",)):
+    buttons = getattr(message, "buttons", None) or getattr(message, "reply_markup", None)
+    if not buttons:
+        return {"clicked": False, "reason": "no_buttons"}
+    for row in buttons:
+        for btn in row:
+            lbl = getattr(btn, "text", "") or ""
+            if any(mt.lower() in lbl.lower() for mt in match_texts):
+                try:
+                    res = await client_obj(functions.messages.GetBotCallbackAnswerRequest(
+                        peer=message.to_id,
+                        msg_id=message.id,
+                        data=btn.data or b""
+                    ))
+                    return {"clicked": True, "button_text": lbl, "callback_result": str(res)}
+                except Exception as e:
+                    return {"clicked": False, "button_text": lbl, "error": repr(e)}
+    return {"clicked": False, "reason": "no_matching_label"}
+
+# ===================== RAID HANDLER =====================
+@client.on(events.NewMessage(chats=[TG_GROUP_ID], incoming=True))
+async def raid_handler(event):
+    try:
+        msg = event.message
+        sender = await event.get_sender()
+        sender_id = getattr(sender, "id", None)
+        if not sender_id or sender_id not in RAID_BOT_IDS:
+            return
+
+        tweet_url, tweet_id = extract_tweet(msg.text or "")
+        if not tweet_id:
+            return
+
+        if tweet_id in smashed_tweet_ids:
+            print(f"⚠️ Already smashed (runtime): {tweet_url}")
+            return
+
+        click_result = await click_inline_button(client, msg, match_texts=("👊",))
+        smashed_tweet_ids.add(tweet_id)
+
+        entry = {
+            "time": now_iso(),
+            "type": "raid_smash",
+            "chat_id": event.chat_id,
+            "message_id": msg.id,
+            "tweet_url": tweet_url,
+            "tweet_id": tweet_id,
+            "smash": click_result
+        }
+        save_json_append(LOG_FILE, entry)
+        feedback = click_result.get('callback_result') or click_result.get('error') or click_result.get('reason')
+        print(f"🔘 Raid smashed: {tweet_url}, feedback: {feedback}")
+    except Exception as e:
+        print("❌ raid_handler error:", e)
+
+# ===================== DAILY CYCLE =====================
+async def daily_cycle():
+    # load influencer handles once
+    influencers = load_lines(INFLUENCERS_FILE)
+    if not influencers:
+        print(f"⚠️ {INFLUENCERS_FILE} is empty — influencer replies will be skipped.")
+    elon_texts = load_lines(ELON_TEXTS)
+    if not elon_texts:
+        print(f"⚠️ {ELON_TEXTS} is empty — please add ELON lines.")
+
+    while True:
+        print("\n🚀 Starting new daily cycle:", datetime.now().isoformat())
+        cycle_start = datetime.now()
+
+        # Prepare schedule: TOTAL_PER_DAY delays inside POST_WINDOW_SECONDS
+        delays = sorted([random.randint(0, POST_WINDOW_SECONDS) for _ in range(TOTAL_PER_DAY)])
+
+        # Build action list
+        actions = (["elon_timeline"] * NUM_ELON_TIMELINE) + (["influencer_reply"] * NUM_INFLUENCER_REPLIES) + (["healthy_timeline"] * NUM_HEALTHY)
+        random.shuffle(actions)  # randomize posting order
+
+        # Select 2 distinct random coins for healthy posts this cycle
+        healthy_coins = random.sample(TOP_10_COINS, k=NUM_HEALTHY)
+
+        tweet_links_today = []          # all tweet links (10)
+        elon_links_today = []           # ELON-related links (timeline + replies) to send to Telegram at end
+
+        for idx, (action, delay) in enumerate(zip(actions, delays)):
+            # wait required time relative to previous
+            if idx == 0:
+                await asyncio.sleep(delay)
+            else:
+                await asyncio.sleep(delay - delays[idx - 1])
+
+            print(f"\n⏱ Action [{idx+1}/{TOTAL_PER_DAY}] -> {action} (scheduled after {delay}s)")
+
+            if action == "elon_timeline":
+                text = random.choice(elon_texts) if elon_texts else "$ELON"
+                # pick random image if any
+                img = None
+                try:
+                    imgs = [f for f in os.listdir(IMAGES_FOLDER) if os.path.isfile(os.path.join(IMAGES_FOLDER, f))]
+                    if imgs:
+                        img = os.path.join(IMAGES_FOLDER, random.choice(imgs))
+                except Exception:
+                    img = None
+
+                tid, url = post_timeline(text, img)
+                if tid:
+                    tweet_links_today.append(url)
+                    elon_links_today.append(url)
+                    save_json_append(LOG_FILE, {"time": now_iso(), "type": "timeline_elon", "tweet_id": tid, "tweet_url": url})
+                    print(f"✅ Posted ELON timeline: {url}")
+                else:
+                    print("❌ Failed ELON timeline post")
+
+            elif action == "healthy_timeline":
+                # pick corresponding healthy coin from the preselected list
+                if not healthy_coins:
+                    print("⚠️ No healthy coins selected; skipping.")
+                    continue
+                # pop one coin from the list
+                coin_symbol = healthy_coins.pop(0)
+                text = build_crypto_post(coin_symbol)
+                # healthy posts are text-only
+                tid, url = post_timeline(text, None)
+                if tid:
+                    tweet_links_today.append(url)
+                    save_json_append(LOG_FILE, {"time": now_iso(), "type": "timeline_healthy", "symbol": coin_symbol, "tweet_id": tid, "tweet_url": url})
+                    print(f"✅ Posted healthy ({coin_symbol}): {url}")
+                else:
+                    print(f"❌ Failed healthy post for {coin_symbol}")
+
+            elif action == "influencer_reply":
+                if not influencers:
+                    print("⚠️ No influencers configured — skipping reply.")
+                    continue
+
+                chosen = None
+                chosen_tid = None
+                chosen_url = None
+                # try to find an influencer tweet we haven't replied to yet (runtime)
+                for _ in range(len(influencers)):
+                    handle = random.choice(influencers).lstrip("@").strip()
+                    tid, url = get_latest_tweet_for_handle(handle)
+                    if not tid:
+                        continue
+                    if tid in replied_tweet_ids:
+                        continue
+                    chosen = handle
+                    chosen_tid = tid
+                    chosen_url = url
+                    break
+
+                if not chosen:
+                    print("⚠️ Could not find influencer tweet to reply to (skipping).")
+                    continue
+
+                # reply templates (human-like, include $ELON)
+                reply_templates = [
+                    "Nice point — $ELON vibes here 🔥",
+                    "Agree — $ELON energy. Interesting take!",
+                    "$ELON — that's worth watching 👀",
+                    "Solid insight. $ELON buzz for sure."
+                ]
+                reply_text = random.choice(reply_templates)
+
+                # choose an image for the reply if available
+                reply_img = None
+                try:
+                    imgs = [f for f in os.listdir(IMAGES_FOLDER) if os.path.isfile(os.path.join(IMAGES_FOLDER, f))]
+                    if imgs:
+                        reply_img = os.path.join(IMAGES_FOLDER, random.choice(imgs))
+                except Exception:
+                    reply_img = None
+
+                # reply with image support
+                tid_int = int(chosen_tid)
+                rtid, rurl = reply_to_tweet_with_image(tid_int, reply_text, reply_img)
+                if rtid:
+                    replied_tweet_ids.add(chosen_tid)
+                    tweet_links_today.append(rurl)
+                    elon_links_today.append(rurl)  # reply is ELON-related
+                    save_json_append(LOG_FILE, {"time": now_iso(), "type": "reply", "influencer": chosen, "replied_to": chosen_tid, "reply_tweet_id": rtid, "reply_url": rurl, "text": reply_text, "image": bool(reply_img)})
+                    print(f"✅ Replied to @{chosen}'s tweet {chosen_url} -> {rurl}")
+                else:
+                    print(f"❌ Failed to reply to @{chosen} ({chosen_tid})")
+
+            else:
+                print("⚠️ Unknown action:", action)
+
+        # After cycle, send only ELON-related links (timeline + replies) to the same Telegram group (all at once)
+        if elon_links_today:
+            summary = "Daily ELON posts (timeline + replies):\n\n" + "\n".join(elon_links_today)
+            try:
+                await client.send_message(TG_GROUP_ID, summary)
+                print("📩 Sent ELON links to Telegram group.")
+            except Exception as e:
+                print("❌ Failed to send ELON links to Telegram:", e)
+        else:
+            print("⚠️ No ELON links to send this cycle.")
+
+        # Sleep randomized between MIN_NEXT_HOURS and MAX_NEXT_HOURS
+        sleep_seconds = random.randint(MIN_NEXT_HOURS * 3600, MAX_NEXT_HOURS * 3600)
+        print(f"⏳ Cycle done. Sleeping {sleep_seconds/3600:.2f} hours until next cycle...")
+        await asyncio.sleep(sleep_seconds)
+
+# ===================== MAIN =====================
+async def main():
+    print("🚀 Starting bot (Telegram login required if first run)...")
+    await client.start()
+    print("✅ Telegram client started. Listening for raids and ready to post.")
+    # run telegram background loop in background
+    telegram_task = asyncio.create_task(client.run_until_disconnected())
+    # start daily cycle (this will run forever)
+    await daily_cycle()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Exiting on user interrupt.")
