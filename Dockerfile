@@ -1,24 +1,24 @@
-# Use a lightweight official Python image
-FROM python:3.11-slim
+# Use official Python image
+FROM python:3.11
 
-# Prevent Python from writing .pyc files and buffer logs
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Install system dependencies (minimal)
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy only requirements first (for better build caching)
-COPY requirements.txt .
-
-# Install dependencies (Telethon, Flask, etc.)
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of your app
+# Copy everything to container
 COPY . .
 
-# Expose port for Render web service
+# Install Python requirements
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Expose port for web service (needed by Railway)
 EXPOSE 10000
 
-# Default command to start the bot
+# Start the Twitter bot
 CMD ["python", "-u", "raid.py"]
