@@ -1,4 +1,3 @@
-telethon 
-tweepy
+telethon>=1.38.2
 flask
-fastApi
+
