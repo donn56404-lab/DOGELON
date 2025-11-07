@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Raid Smash Listener (Render-ready, Safe Version)
-------------------------------------------------
-✅ Listens for raid messages in one group
+Raid Smash Listener (Render-ready, Dual-Group Version)
+------------------------------------------------------
+✅ Listens for raid messages in two groups
+✅ Each group can have its own raid bot(s)
 ✅ Clicks the 👊 button automatically
 ✅ Avoids smashing the same tweet twice
 ✅ Logs and prints callback results
@@ -21,17 +22,24 @@ from flask import Flask, jsonify
 TG_API_ID = 27403368
 TG_API_HASH = "7cfc7759b82410f5d90641d6a6fc415f"
 SESSION = "session"
-TG_GROUP_ID = -1002325443922
-RAID_BOT_IDS = [8004181615]
 PORT = int(os.getenv("PORT", 8080))
 LOG_FILE = "smashed_links.json"
+
+# 👇 Two groups + bots
+GROUPS = [
+    {"id": -1002325443922, "raid_bots": [8004181615]},  # main group
+    {"id": -1002409595600, "raid_bots": [5994885234]},  # extra group
+]
 # =====================
 
 client = TelegramClient(SESSION, TG_API_ID, TG_API_HASH)
 app = Flask(__name__)
 
 # Regex to detect tweet/x.com links
-TWEET_RE = re.compile(r"(https?://(?:x\.com|twitter\.com)/[^\s]+/status(?:es)?/(\d+))", re.IGNORECASE)
+TWEET_RE = re.compile(
+    r"(https?://(?:x\.com|twitter\.com)/[^\s]+/status(?:es)?/(\d+))",
+    re.IGNORECASE,
+)
 
 # Load previously smashed tweet IDs
 def load_smashed_links():
@@ -78,11 +86,13 @@ async def click_smash_button(msg):
         for btn in row:
             if "👊" in (btn.text or ""):
                 try:
-                    res = await client(functions.messages.GetBotCallbackAnswerRequest(
-                        peer=msg.to_id,
-                        msg_id=msg.id,
-                        data=btn.data or b""
-                    ))
+                    res = await client(
+                        functions.messages.GetBotCallbackAnswerRequest(
+                            peer=msg.to_id,
+                            msg_id=msg.id,
+                            data=btn.data or b"",
+                        )
+                    )
                     print(f"✅ Smashed {msg.id} | Callback: {res}")
                     return "clicked"
                 except Exception as e:
@@ -90,13 +100,18 @@ async def click_smash_button(msg):
                     return "error"
     return "no_match"
 
-@client.on(events.NewMessage(chats=[TG_GROUP_ID], incoming=True))
+@client.on(events.NewMessage(incoming=True))
 async def raid_listener(event):
-    """Main raid listener."""
+    """Unified listener for all configured groups."""
     try:
         msg = event.message
+        chat_id = event.chat_id
         sender = await event.get_sender()
-        if sender.id not in RAID_BOT_IDS:
+        sender_id = getattr(sender, "id", None)
+
+        # Find group config for this chat
+        group_conf = next((g for g in GROUPS if g["id"] == chat_id), None)
+        if not group_conf or sender_id not in group_conf["raid_bots"]:
             return
 
         text = msg.text or ""
@@ -106,14 +121,15 @@ async def raid_listener(event):
 
         # Skip if already smashed
         if tweet_id in smashed_links:
-            print(f"⚠️ Already smashed: {tweet_url}")
+            print(f"⚠️ Already smashed (runtime): {tweet_url}")
             return
 
         result = await click_smash_button(msg)
         if result == "clicked":
             smashed_links.add(tweet_id)
             save_smashed_links()
-            print(f"💾 Recorded smashed tweet: {tweet_url}")
+            print(f"💾 Recorded smashed tweet: {tweet_url} (group {chat_id})")
+
     except Exception as e:
         print(f"❌ Listener error: {e}")
 
@@ -121,6 +137,7 @@ async def run_telethon():
     await client.start()
     me = await client.get_me()
     print(f"✅ Logged in as {me.username or me.first_name}")
+    print(f"📡 Monitoring {len(GROUPS)} groups for raids...")
     await client.run_until_disconnected()
 
 def run_flask():
