@@ -1,39 +1,87 @@
-========================================
-26.0.0.40 - WINDOWS - 11/16/2025 12:04:27 AM
-========================================
-Error disabling WindowsUpdate: vMix.vMixServiceException: vMix Service Not Ready
-   at vMix.vMixServiceClient.Startup()
-   at qzzzzzr.w()
-========================================
-26.0.0.40 - Startup - 11/16/2025 12:04:29 AM
-========================================
-System.ArgumentException: Value of '0' is not valid for 'emSize'. 'emSize' should be greater than 0 and less than or equal to System.Single.MaxValue.
-Parameter name: emSize
-   at System.Drawing.Font.Initialize(FontFamily family, Single emSize, FontStyle style, GraphicsUnit unit, Byte gdiCharSet, Boolean gdiVerticalFont)
-   at System.Drawing.Font..ctor(String familyName, Single emSize, FontStyle style, GraphicsUnit unit)
-   at qq.l()
-   at qq..ctor(mf a, Size a, Color a, Color a, Color a, MultiViewLayout a, qv a)
-   at ri.a..ctor(MultiViewLayout a, qv a)
-   at ri..ctor(ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a)
-   at qzzzzzr.x(frmmain a)
-========================================
-26.0.0.40 - BackupRegistration - 11/16/2025 12:51:32 AM
-========================================
-System.IO.FileNotFoundException: Could not find file 'C:\ProgramData\vMix\es.xml'.
-File name: 'C:\ProgramData\vMix\es.xml'
-   at System.IO.__Error.WinIOError(Int32 errorCode, String maybeFullPath)
-   at System.IO.File.InternalCopy(String sourceFileName, String destFileName, Boolean overwrite)
-   at System.IO.File.Copy(String sourceFileName, String destFileName)
-   at ezzzzzi.zk()
-========================================
-26.0.0.40 - Startup - 11/16/2025 12:51:34 AM
-========================================
-System.ArgumentException: Value of '0' is not valid for 'emSize'. 'emSize' should be greater than 0 and less than or equal to System.Single.MaxValue.
-Parameter name: emSize
-   at System.Drawing.Font.Initialize(FontFamily family, Single emSize, FontStyle style, GraphicsUnit unit, Byte gdiCharSet, Boolean gdiVerticalFont)
-   at System.Drawing.Font..ctor(String familyName, Single emSize, FontStyle style, GraphicsUnit unit)
-   at qq.l()
-   at qq..ctor(mf a, Size a, Color a, Color a, Color a, MultiViewLayout a, qv a)
-   at ri.a..ctor(MultiViewLayout a, qv a)
-   at ri..ctor(ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a)
-   at qzzzzzr.x(frmmain a)
+vMix Installation Configuration Tool
+Version 5.0
+11/10/2025 10:27:45 PM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Upgrading settings...
+Upgrading Social settings...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Configuration complete
+vMix Installation Configuration Tool
+Version 5.0
+11/10/2025 10:57:46 PM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Upgrading settings...
+Upgrading Social settings...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Configuration complete
+vMix Installation Configuration Tool
+Version 5.0
+11/14/2025 10:24:34 AM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Upgrading settings...
+Upgrading Social settings...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Configuration complete
+vMix Installation Configuration Tool
+Version 2.0
+11/15/2025 11:34:16 PM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Updating AJA drivers.....
+Configuration complete
+vMix Installation Configuration Tool
+Version 2.0
+11/15/2025 11:45:45 PM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Updating AJA drivers.....
+Configuration complete
+vMix Installation Configuration Tool
+Version 2.0
+11/16/2025 12:11:26 AM
+Detecting system type...
+Model: 
+Upgrading licenses...
+Disabling conflicting graphics services.....
+Configured Nahimic
+No Nahimic processes found
+Nahimic OSD DLL Not Found
+Nahimic Blacklist file not found
+
+Updating AJA drivers.....
+Configuration complete
