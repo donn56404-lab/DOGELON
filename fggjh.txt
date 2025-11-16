@@ -1,14 +1,39 @@
 ========================================
-26.0.0.40 - Startup - 11/16/2025 12:25:03 AM
+26.0.0.40 - WINDOWS - 11/16/2025 12:04:27 AM
 ========================================
-System.UnauthorizedAccessException: Access to the path 'C:\ProgramData\vMix\video.txt' is denied.
+Error disabling WindowsUpdate: vMix.vMixServiceException: vMix Service Not Ready
+   at vMix.vMixServiceClient.Startup()
+   at qzzzzzr.w()
+========================================
+26.0.0.40 - Startup - 11/16/2025 12:04:29 AM
+========================================
+System.ArgumentException: Value of '0' is not valid for 'emSize'. 'emSize' should be greater than 0 and less than or equal to System.Single.MaxValue.
+Parameter name: emSize
+   at System.Drawing.Font.Initialize(FontFamily family, Single emSize, FontStyle style, GraphicsUnit unit, Byte gdiCharSet, Boolean gdiVerticalFont)
+   at System.Drawing.Font..ctor(String familyName, Single emSize, FontStyle style, GraphicsUnit unit)
+   at qq.l()
+   at qq..ctor(mf a, Size a, Color a, Color a, Color a, MultiViewLayout a, qv a)
+   at ri.a..ctor(MultiViewLayout a, qv a)
+   at ri..ctor(ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a)
+   at qzzzzzr.x(frmmain a)
+========================================
+26.0.0.40 - BackupRegistration - 11/16/2025 12:51:32 AM
+========================================
+System.IO.FileNotFoundException: Could not find file 'C:\ProgramData\vMix\es.xml'.
+File name: 'C:\ProgramData\vMix\es.xml'
    at System.IO.__Error.WinIOError(Int32 errorCode, String maybeFullPath)
-   at System.IO.FileStream.Init(String path, FileMode mode, FileAccess access, Int32 rights, Boolean useRights, FileShare share, Int32 bufferSize, FileOptions options, SECURITY_ATTRIBUTES secAttrs, String msgPath, Boolean bFromProxy)
-   at System.IO.FileStream..ctor(String path, FileMode mode, FileAccess access, FileShare share, Int32 bufferSize, FileOptions options, String msgPath, Boolean bFromProxy)
-   at System.IO.FileStream..ctor(String path, FileMode mode, FileAccess access, FileShare share, Int32 bufferSize, FileOptions options)
-   at System.IO.StreamWriter..ctor(String path, Boolean append, Encoding encoding, Int32 bufferSize)
-   at System.IO.StreamWriter..ctor(String path, Boolean append, Encoding encoding)
-   at System.IO.File.WriteAllText(String path, String contents, Encoding encoding)
-   at ri.zg(rh a)
-   at ri.ze()
+   at System.IO.File.InternalCopy(String sourceFileName, String destFileName, Boolean overwrite)
+   at System.IO.File.Copy(String sourceFileName, String destFileName)
+   at ezzzzzi.zk()
+========================================
+26.0.0.40 - Startup - 11/16/2025 12:51:34 AM
+========================================
+System.ArgumentException: Value of '0' is not valid for 'emSize'. 'emSize' should be greater than 0 and less than or equal to System.Single.MaxValue.
+Parameter name: emSize
+   at System.Drawing.Font.Initialize(FontFamily family, Single emSize, FontStyle style, GraphicsUnit unit, Byte gdiCharSet, Boolean gdiVerticalFont)
+   at System.Drawing.Font..ctor(String familyName, Single emSize, FontStyle style, GraphicsUnit unit)
+   at qq.l()
+   at qq..ctor(mf a, Size a, Color a, Color a, Color a, MultiViewLayout a, qv a)
+   at ri.a..ctor(MultiViewLayout a, qv a)
+   at ri..ctor(ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a, ContextMenuStrip a)
    at qzzzzzr.x(frmmain a)
